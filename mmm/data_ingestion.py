@@ -11,10 +11,9 @@ logger = get_logger(__name__)
 
 
 class DataIngestion:
-    """Handles loading, merging, cleaning, and validating marketing and sales data."""
-
     def __init__(self, data_dir: str = config.DATA_DIR):
         self.data_dir = Path(data_dir)
+        self.parquet_path = self.data_dir / "processed_data.parquet"
 
     def load_csv(self, filename: str) -> pd.DataFrame:
         file_path = self.data_dir / filename
@@ -45,8 +44,18 @@ class DataIngestion:
         return merged_df
 
     def load_all_data(self) -> pd.DataFrame:
+        # Check if parquet exists
+        if self.parquet_path.exists():
+            logger.info("Loading processed dataset from parquet for efficiency.")
+            return pd.read_parquet(self.parquet_path)
+
+        # Else → Load CSVs, clean, validate
         merged_df = self.merge_all_data()
-        merged_df = clean_dataset(merged_df)  #  Clean before validation
-        merged_data_schema.validate(merged_df)  #  Final schema validation
-        logger.info(f"Final dataset shape: {merged_df.shape}")
+        merged_df = clean_dataset(merged_df)
+        merged_data_schema.validate(merged_df)
+
+        # Save as parquet for next time
+        merged_df.to_parquet(self.parquet_path, index=False)
+        logger.info(f" Processed dataset saved to {self.parquet_path}")
+
         return merged_df
