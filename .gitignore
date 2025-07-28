@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.env.*  # optional: ignore other env variants like .env.dev
+.venv/
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Migrations (optional - only if you want clean migrations per env)
+# **/migrations/*.py
+# **/migrations/*.pyc
+
+# Pip
+pip-wheel-metadata/
+pip-log.txt
+
+# Test
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# Docker (optional)
+*.pid
+*.tar
+*.log
+
+# Others
+*.swp
