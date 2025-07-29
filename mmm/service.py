@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from sklearn.metrics import mean_squared_error, r2_score
 
 from mmm import config
 from mmm.data_ingestion import DataIngestion
@@ -28,22 +30,73 @@ class MMMService:
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
     def _prepare_features(self, df: pd.DataFrame, training: bool = True):
-        """
-        Prepares X (and y if available) for training or prediction.
-        training=True -> expects 'sales' column
-        training=False -> only returns X
-        """
+        if "date" in df.columns:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
         spend_cols = [c for c in df.columns if c.endswith("_spend")]
         transformed_df = self.preprocessor.transform(df, spend_cols)
 
-        feature_cols = [f"{c}_transformed" for c in spend_cols]
-        X = transformed_df[feature_cols]
+        # Add lagged sales & rolling averages
+        if "sales" in transformed_df.columns:
+            transformed_df["sales_lag1"] = (
+                transformed_df["sales"].shift(1).fillna(method="bfill")
+            )
+            transformed_df["sales_lag7"] = (
+                transformed_df["sales"].shift(7).fillna(method="bfill")
+            )
+            transformed_df["sales_lag14"] = (
+                transformed_df["sales"].shift(14).fillna(method="bfill")
+            )
+            transformed_df["sales_ma7"] = (
+                transformed_df["sales"]
+                .rolling(7)
+                .mean()
+                .shift(1)
+                .fillna(method="bfill")
+            )
+            transformed_df["sales_ma14"] = (
+                transformed_df["sales"]
+                .rolling(14)
+                .mean()
+                .shift(1)
+                .fillna(method="bfill")
+            )
+        else:
+            for col in [
+                "sales_lag1",
+                "sales_lag7",
+                "sales_lag14",
+                "sales_ma7",
+                "sales_ma14",
+            ]:
+                transformed_df[col] = 0
 
-        y = (
-            transformed_df["sales"]
-            if training and "sales" in transformed_df.columns
-            else None
-        )
+        # Add time features
+        transformed_df["quarter"] = transformed_df["date"].dt.quarter
+        transformed_df["weekofyear"] = transformed_df["date"].dt.isocalendar().week
+        transformed_df["is_weekend"] = (
+            transformed_df["date"].dt.dayofweek >= 5
+        ).astype(int)
+
+        # Select features
+        feature_cols = [f"{c}_transformed" for c in spend_cols] + [
+            "sales_lag1",
+            "sales_lag7",
+            "sales_lag14",
+            "sales_ma7",
+            "sales_ma14",
+            "quarter",
+            "weekofyear",
+            "is_weekend",
+        ]
+
+        X = transformed_df[feature_cols].copy()
+        X = np.log1p(X)  # log transform features
+
+        # Target as log(sales)
+        y = None
+        if training and "sales" in transformed_df.columns:
+            y = np.log1p(transformed_df["sales"])
+
         return X, y
 
     def train(self) -> None:
@@ -73,4 +126,35 @@ class MMMService:
         """
         X, _ = self._prepare_features(new_data, training=False)
         preds = self.model.predict(X)
+        preds = np.expm1(preds)  # Convert back from log scale
         return pd.Series(preds, index=new_data.index)
+
+    def evaluate_models(self) -> dict:
+        df = self.data_ingestion.load_all_data()
+        X, y = self._prepare_features(df, training=True)
+
+        split_idx = int(0.8 * len(X))
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+
+        results = {}
+
+        for model_type in ["linear", "ridge", "rf"]:
+            model = ModelFactory.get_model(model_type)
+            model.train(X_train, y_train)
+            y_pred = model.predict(X_test)
+
+            metrics = {
+                "r2": float(r2_score(y_test, y_pred)),
+                "rmse": float(np.sqrt(mean_squared_error(y_test, y_pred))),
+                "mape": float(
+                    np.mean(
+                        np.abs(
+                            (y_test.clip(lower=1e-6) - y_pred) / y_test.clip(lower=1e-6)
+                        )
+                    )
+                ),
+            }
+            results[model_type] = metrics
+
+        return results

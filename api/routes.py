@@ -26,7 +26,7 @@ def predict_sales(data: list[SpendInput], service: MMMService = Depends(get_serv
         preds = service.predict(new_data)
 
         predictions = [
-            PredictionOutput(date=row["date"], predicted_sales=float(pred))
+            PredictionOutput(date=str(row["date"]), predicted_sales=float(pred))
             for row, pred in zip(new_data.to_dict(orient="records"), preds)
         ]
 
@@ -36,5 +36,14 @@ def predict_sales(data: list[SpendInput], service: MMMService = Depends(get_serv
         raise HTTPException(
             status_code=404, detail="Trained model not found. Train the model first."
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/evaluate", summary="Evaluate model performance")
+def evaluate_model(service: MMMService = Depends(get_service)):
+    try:
+        metrics = service.evaluate_models()
+        return {"metrics": metrics}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
